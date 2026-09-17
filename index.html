@@ -739,9 +739,26 @@ function reasonchg(){
 }
 function reschg(){document.getElementById('f-othwrap').style.display=document.getElementById('f-res').value==='Others'?'block':'none';}
 function val(id){var e=document.getElementById(id);return e?e.value.trim():'';}
-function saveForm(id,isNew){
+function saveForm(id,isNew,force){
   var name=val('f-name');
   if(!name){toast('Enter the customer name');return;}
+  if(isNew&&!force){
+    var ph=val('f-phone').replace(/[^\d]/g,''),nl=name.toLowerCase();
+    var dupe=DB.items.filter(function(i){
+      if((i.name||'').toLowerCase()===nl)return true;
+      var ip=(i.phone||'').replace(/[^\d]/g,'');
+      return ph.length>6&&ip.length>6&&ip.slice(-9)===ph.slice(-9);
+    })[0];
+    if(dupe){
+      document.getElementById('cf-title').textContent='Already logged?';
+      document.getElementById('cf-body').textContent=dupe.name+' is already on the dashboard, opened '+fmt(dupe.opened)+', status '+dupe.status+'. Save this as a second case anyway?';
+      var y=document.getElementById('cf-yes');
+      y.textContent='Yes, save it';
+      y.onclick=function(){y.textContent='Yes, delete';closeConfirm();saveForm(id,isNew,true);};
+      document.getElementById('confirm').classList.add('on');
+      return;
+    }
+  }
   var pv=document.getElementById('f-ptype').value,sf=pv!=='ot';
   var st=val('f-status');
   var it=isNew?{id:id,notes:[]}:get(id);
@@ -900,6 +917,24 @@ function applyTheme(){
 }
 function toggleTheme(){DB.theme=DB.theme==='dark'?'light':'dark';save();applyTheme();}
 document.getElementById('sheet').onclick=function(e){if(e.target===this)closeSheet();};
+document.getElementById('confirm').onclick=function(e){if(e.target===this)closeConfirm();};
+
+var VIEW='home';
+function goView(v){
+  document.querySelectorAll('nav button').forEach(function(x){x.classList.toggle('on',x.dataset.v===v);});
+  document.querySelectorAll('.view').forEach(function(x){x.classList.remove('on');});
+  var el=document.getElementById('v-'+v);
+  if(el)el.classList.add('on');
+  VIEW=v;window.scrollTo(0,0);
+}
+function pushBlock(){try{history.pushState({s:'block'},'');}catch(e){}}
+try{history.replaceState({s:'home'},'');}catch(e){}
+window.addEventListener('popstate',function(){
+  var cf=document.getElementById('confirm'),sh=document.getElementById('sheet');
+  if(cf.classList.contains('on')){closeConfirm();pushBlock();return;}
+  if(sh.classList.contains('on')){closeSheet();pushBlock();return;}
+  if(VIEW!=='home'){window.__filter='';goView('home');render();pushBlock();return;}
+});
 applyTheme();
 render();
 if('serviceWorker' in navigator){
