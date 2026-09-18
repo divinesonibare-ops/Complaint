@@ -226,10 +226,12 @@ button.dz.small{padding:10px 13px;font-size:12.5px}
     <h2 class="sec">Your data</h2>
     <div class="acts">
       <button class="g" onclick="expo()">Export backup file</button>
-      <button class="g" onclick="document.getElementById('impf').click()">Restore backup</button>
+      <button class="b" onclick="IMPMODE='merge';document.getElementById('impf').click()">Add cases from a file</button>
     </div>
     <input type="file" id="impf" accept=".json" style="display:none" onchange="impo(this)">
-    <p class="hint">Everything saves on this device only. Export a backup before clearing your browser data or changing phone.</p>
+    <p class="hint">Adding from a file never wipes what you already have. New names get added, and a name already on the dashboard is overwritten by the version in the file.</p>
+    <div class="acts"><button class="dz small" onclick="IMPMODE='replace';document.getElementById('impf').click()">Wipe and replace everything</button></div>
+    <p class="hint">Only for starting again from scratch, after losing your phone for example. It asks before doing anything.</p>
   </div>
 </main>
 
@@ -894,9 +896,45 @@ function expo(){
   DB.lastBackup=today();save();render();
   toast('Backup downloaded');
 }
+var IMPMODE='merge';
 function impo(inp){
   var f=inp.files[0];if(!f)return;var r=new FileReader();
-  r.onload=function(){try{var o=JSON.parse(r.result);if(!o.items)throw 0;DB=o;if(!DB.done)DB.done={};save();render();toast('Backup restored');}catch(e){toast('That file did not load');}};
+  r.onload=function(){
+    var o;
+    try{o=JSON.parse(r.result);if(!o.items||!o.items.length)throw 0;}
+    catch(e){toast('That file did not load');return;}
+    if(IMPMODE==='replace'){
+      document.getElementById('cf-title').textContent='Replace everything?';
+      document.getElementById('cf-body').textContent='This deletes all '+DB.items.length+' cases on this phone and leaves only the '+o.items.length+' in the file. Everything else goes.';
+      var y=document.getElementById('cf-yes');y.textContent='Yes, replace all';
+      y.onclick=function(){
+        y.textContent='Yes, delete';
+        DB=o;if(!DB.done)DB.done={};
+        save();closeConfirm();render();toast('Replaced with '+DB.items.length+' cases');
+      };
+      document.getElementById('confirm').classList.add('on');
+      return;
+    }
+    var byName={};
+    DB.items.forEach(function(i,ix){byName[(i.name||'').toLowerCase().trim()]=ix;});
+    var added=0,updated=0;
+    o.items.forEach(function(inc){
+      var key=(inc.name||'').toLowerCase().trim();
+      if(!key)return;
+      if(byName.hasOwnProperty(key)){
+        var ix=byName[key],oldId=DB.items[ix].id;
+        inc.id=oldId;
+        DB.items[ix]=inc;updated++;
+      } else {
+        while(DB.items.filter(function(x){return x.id===inc.id;}).length)inc.id=inc.id+'x';
+        byName[key]=DB.items.length;
+        DB.items.push(inc);added++;
+      }
+    });
+    if(o.reasons){if(!DB.reasons)DB.reasons=[];o.reasons.forEach(function(rr){if(DB.reasons.indexOf(rr)<0){DB.reasons.push(rr);if(REASONS.indexOf(rr)<0)REASONS.push(rr);}});}
+    save();render();
+    toast(added+' added, '+updated+' updated');
+  };
   r.readAsText(f);inp.value='';
 }
 
