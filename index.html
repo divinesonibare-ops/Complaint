@@ -325,7 +325,8 @@ function todosFor(it){
   }
   (it.tasks||[]).forEach(function(tk,ix){
     if(tk.done)return;
-    if(tk.date<=today())out.push({k:'task'+ix,due:diffDays(it.opened,tk.date)+1-pausedTotal(it),act:tk.text,why:'Your own task, set for '+fmt(tk.date),custom:true});
+    if(tk.date<=today())out.push({k:'task'+ix,due:diffDays(it.opened,tk.date)+1-pausedTotal(it),act:tk.text,
+      why:'Your own task, set for '+fmt(tk.date)+(tk.time?' at '+hhmm(tk.time):''),custom:true,time:tk.time||''});
   });
   if(it.status==='Pending solution'){
     out.push({k:'pend'+d,due:d,act:'Chase the pending '+(it.resolution||'solution').toLowerCase(),why:'Held up internally since '+fmt(it.pendSince||it.opened)});
@@ -351,7 +352,13 @@ function allTodos(){
     return g;
   });
   b.sort(function(a,c){return c.over-a.over;});
-  t.sort(function(a,c){return daysLeft(a.it)-daysLeft(c.it);});
+  t.sort(function(a,c){
+    var at=a.time||'',ct=c.time||'';
+    if(at&&ct&&at!==ct)return at<ct?-1:1;
+    if(at&&!ct)return -1;
+    if(!at&&ct)return 1;
+    return daysLeft(a.it)-daysLeft(c.it);
+  });
   return {today:t,behind:b};
 }
 function clearMissed(id){
@@ -511,7 +518,7 @@ function todoCard(x,over){
   return '<div class="todo '+c+'">'+
     '<button class="tick" onclick="markDone(\''+x.it.id+'\',\''+x.k+'\')" aria-label="Mark done"></button>'+
     '<div class="todo-b" onclick="openItem(\''+x.it.id+'\')">'+
-      '<div class="todo-act">'+esc(x.act)+'</div>'+
+      '<div class="todo-act">'+(x.time?'<span style="color:var(--blue)">'+hhmm(x.time)+'</span>  ':'')+esc(x.act)+'</div>'+
       '<div class="todo-who">'+esc(x.it.name)+' &middot; '+esc(x.it.product)+' &middot; day '+dayNum(x.it)+' of 15</div>'+
       '<div class="todo-why">'+esc(x.why)+'</div>'+
       (over?'<span class="od">'+x.over+' day'+(x.over>1?'s':'')+' late</span>':'')+
@@ -540,12 +547,29 @@ function markDone(id,k){
   DB.done[id+':'+k]={on:today()};save();render();toast('Marked done');
 }
 function addTask(id){
-  var d=val('t-date'),x=val('t-text');
+  var d=val('t-date'),x=val('t-text'),tm=val('t-time');
   if(!d){toast('Pick a date');return;}
   if(!x){toast('Write what to do');return;}
   var it=get(id);if(!it.tasks)it.tasks=[];
-  it.tasks.push({date:d,text:x,done:false});
-  save();openItem(id);toast('Task set for '+fmt(d));
+  it.tasks.push({date:d,text:x,time:tm||'',done:false});
+  save();openItem(id);toast('Task set for '+fmt(d)+(tm?' at '+hhmm(tm):''));
+}
+function hhmm(t){
+  if(!t)return '';
+  var a=t.split(':'),h=+a[0],m=a[1];
+  var ap=h<12?'am':'pm',h12=h%12||12;
+  return h12+':'+m+ap;
+}
+function alarmFor(tk){
+  var a=(tk.time||'').split(':');
+  if(a.length<2){toast('No time set on this task');return;}
+  try{
+    var u='intent://alarm#Intent;scheme=alarmclock;action=android.intent.action.SET_ALARM;'+
+      'i.android.intent.extra.alarm.HOUR='+(+a[0])+';'+
+      'i.android.intent.extra.alarm.MINUTES='+(+a[1])+';'+
+      'S.android.intent.extra.alarm.MESSAGE='+encodeURIComponent(tk.text)+';end';
+    window.location.href=u;
+  }catch(e){toast('Could not open your alarm app');}
 }
 function delTask(id,ix){
   var it=get(id);it.tasks.splice(ix,1);
@@ -596,13 +620,17 @@ function openItem(id){
 
   h+='<h2 class="sec">My own tasks for this customer</h2>';
   h+='<div class="card"><div class="two"><div><label style="margin-top:0">Date</label><input type="date" id="t-date" value="'+today()+'"></div>'+
-     '<div><label style="margin-top:0">What to do</label><input id="t-text" placeholder="Call her again"></div></div>'+
-     '<div class="acts"><button class="b sm" onclick="addTask(\''+it.id+'\')">Set task</button></div></div>';
+     '<div><label style="margin-top:0">Time, optional</label><input type="time" id="t-time"></div></div>'+
+     '<label>What to do</label><input id="t-text" placeholder="Call her again">'+
+     '<div class="acts"><button class="b sm" onclick="addTask(\''+it.id+'\')">Set task</button></div>'+
+     '<p class="hint">A time does not ring on its own. It sorts your Today list and gives you a button to set a phone alarm.</p></div>';
   if(it.tasks&&it.tasks.length){
     it.tasks.forEach(function(tk,ix){
-      h+='<div class="note"><div class="note-d">'+fmt(tk.date)+(tk.done?' &middot; done':'')+
+      h+='<div class="note"><div class="note-d">'+fmt(tk.date)+(tk.time?' at '+hhmm(tk.time):'')+(tk.done?' &middot; done':'')+
          ' <button class="x" style="float:right;font-size:17px" onclick="delTask(\''+it.id+'\','+ix+')">&times;</button></div>'+
-         '<div class="note-t"'+(tk.done?' style="text-decoration:line-through;color:var(--ink-3)"':'')+'>'+esc(tk.text)+'</div></div>';
+         '<div class="note-t"'+(tk.done?' style="text-decoration:line-through;color:var(--ink-3)"':'')+'>'+esc(tk.text)+'</div>'+
+         (tk.time&&!tk.done?'<div class="acts"><button class="g sm" onclick="alarmFor(get(\''+it.id+'\').tasks['+ix+'])">Set a phone alarm for this</button></div>':'')+
+         '</div>';
     });
   } else h+='<div class="empty" style="padding:14px">No tasks set.</div>';
 
@@ -826,7 +854,7 @@ function buildReport(){
   var to=today(),from=addDays(to,-(n-1));
   var inR=function(d){return d&&d>=from&&d<=to;};
   var neu=DB.items.filter(function(i){return inR(i.opened);});
-  var res=DB.items.filter(function(i){return i.status==='Resolved'&&inR(i.closedOn);});
+  var res=DB.items.filter(function(i){return !isLive(i)&&inR(i.closedOn);});
   var pend=DB.items.filter(isLive);
   var esc_=DB.items.filter(function(i){return i.status==='Escalated';});
   var refund=0;
@@ -855,14 +883,23 @@ function buildReport(){
   L.push('');
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
   L.push('');
-  L.push('\u2705 RESOLVED '+head);
+  L.push('\u2705 CLOSED OFF '+head);
   L.push('');
   if(res.length)res.forEach(function(i,k){
-    var how=i.resolution==='Refunded'?('Refund '+(i.amount||'')):(i.resolution==='Replaced'?'Swap Arranged':(i.resOther||'Issue Explained'));
+    var how;
+    if(i.status==='Resolved')how=i.resolution==='Refunded'?('Refund '+(i.amount||'')):(i.resolution==='Replaced'?'Swap Arranged':(i.resOther||'Issue Explained'));
+    else how=i.status+(i.reason?', '+i.reason:'');
     L.push((k+1)+'. '+i.name+' - '+i.product+' - '+how);
   });else L.push('None');
   L.push('');
-  L.push('Total Resolved: '+res.length);
+  L.push('Total Closed Off: '+res.length);
+  var nRef=res.filter(function(i){return i.resolution==='Refunded';}).length;
+  var nRep=res.filter(function(i){return i.resolution==='Replaced';}).length;
+  var nOth=res.filter(function(i){return i.status==='Resolved';}).length-nRef-nRep;
+  var nCls=res.filter(function(i){return i.status==='Closed';}).length;
+  var nCan=res.filter(function(i){return i.status==='Cancelled';}).length;
+  L.push('Refunded: '+nRef+' | Replaced: '+nRep+(nOth>0?' | Other resolution: '+nOth:''));
+  L.push('Closed: '+nCls+' | Cancelled: '+nCan);
   L.push('Refunds Paid: \u20A6'+refund.toLocaleString());
   L.push('');
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
@@ -884,7 +921,7 @@ function buildReport(){
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
   L.push('');
   L.push('SUMMARY');
-  L.push('New: '+neu.length+' | Resolved: '+res.length+' | Pending: '+pend.length);
+  L.push('New: '+neu.length+' | Closed off: '+res.length+' | Pending: '+pend.length);
   document.getElementById('repout').textContent=L.join('\n');
 }
 
