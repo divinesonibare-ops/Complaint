@@ -163,6 +163,11 @@ pre.rep{background:var(--card);border:1px solid var(--rule);border-radius:10px;p
 .stat.lgrey .stat-n{color:var(--lgrey)}
 .stat.dgrey .stat-n{color:var(--dgrey)}
 .mini{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:5px 13px;margin-bottom:14px}
+.subs{display:flex;gap:6px;overflow-x:auto;margin-bottom:13px;padding-bottom:2px}
+.subs button{flex:0 0 auto;background:var(--card);border:1px solid var(--rule-2);border-radius:20px;padding:8px 13px;font:500 13px/1 inherit;color:var(--ink-2);cursor:pointer;white-space:nowrap}
+.subs button.on{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+[data-theme="dark"] .subs button.on{background:#ECECE6;color:#121211;border-color:#ECECE6}
+.subs button .c{opacity:.65;margin-left:4px}
 .oldrow{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--rule);cursor:pointer}
 .oldrow:last-child{border-bottom:0}
 .oldrow .n{font-weight:600;font-size:14.5px}
@@ -209,20 +214,27 @@ button.dz.small{padding:10px 13px;font-size:12.5px}
     <div id="alllist"></div>
   </div>
   <div class="view" id="v-report">
-    <label style="margin-top:4px">How many days should this report cover</label>
-    <select id="repdays" onchange="buildReport()">
+    <label style="margin-top:4px">How much should this report cover</label>
+    <select id="repdays" onchange="rangeChg()">
       <option value="1">Today only</option>
       <option value="2">Last 2 days</option>
       <option value="3">Last 3 days</option>
       <option value="7" selected>Last 7 days, one week</option>
       <option value="14">Last 14 days, two weeks</option>
       <option value="30">Last 30 days, one month</option>
+      <option value="custom">Pick exact dates and times</option>
     </select>
-    <label>Or type any number of days</label>
-    <input type="number" id="repcustom" min="1" max="365" placeholder="e.g. 5" oninput="buildReport()">
+    <div id="repnum"><label>Or type any number of days</label>
+      <input type="number" id="repcustom" min="1" max="365" placeholder="e.g. 5" oninput="buildReport()"></div>
+    <div id="repexact" style="display:none">
+      <div class="two"><div><label>From date</label><input type="date" id="rf-date"></div>
+        <div><label>From time</label><input type="time" id="rf-time" value="00:00"></div></div>
+      <div class="two"><div><label>To date</label><input type="date" id="rt-date"></div>
+        <div><label>To time</label><input type="time" id="rt-time"></div></div>
+    </div>
     <div class="acts"><button class="b sm" onclick="buildReport()">Build report</button></div>
     <pre class="rep" id="repout">Pick a range above.</pre>
-    <div class="acts"><button class="b" onclick="copyTxt(document.getElementById('repout').textContent)">Copy report</button></div>
+    <div class="acts"><button class="b" onclick="copyTxt(document.getElementById('repout').textContent)">Copy everything, ready to paste into Claude</button></div>
     <h2 class="sec">Your data</h2>
     <div class="acts">
       <button class="g" onclick="expo()">Export backup file</button>
@@ -273,7 +285,9 @@ function toDate(s){var a=s.split('-');return new Date(+a[0],+a[1]-1,+a[2]);}
 function diffDays(a,b){return Math.round((toDate(b)-toDate(a))/86400000);}
 function pausedTotal(it){var p=it.pausedDays||0;if(it.pausedSince)p+=diffDays(it.pausedSince,today());return p;}
 function dayNum(it){var n=diffDays(it.opened,today())+1-pausedTotal(it);return n<1?1:n;}
-function daysLeft(it){return 15-dayNum(it);}
+function winLen(it){var e=+it.extend||0;return 15+e;}
+function endDate(it){return addDays(it.opened,winLen(it)-1+pausedTotal(it));}
+function daysLeft(it){return winLen(it)-dayNum(it);}
 function fmt(s){if(!s)return '';var d=toDate(s);var m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return d.getDate()+' '+m[d.getMonth()]+' '+d.getFullYear();}
 function greet(){var h=new Date().getHours();return h<12?'Good morning':(h<16?'Good afternoon':'Good evening');}
 function addDays(s,n){var d=toDate(s);d.setDate(d.getDate()+n);return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());}
@@ -313,8 +327,9 @@ function todosFor(it){
     if(d>=5)out.push({k:'d5',due:5,act:'Call the customer',why:'Day 5, still not responsive'});
     if(d>=10)out.push({k:'d10',due:10,act:'Send ultimatum',why:'Day 10, give deadline of day 15'});
   }
-  if(d>=13&&d<15)out.push({k:'d13',due:13,act:'Two days left on this case',why:'Closes on '+fmt(addDays(it.opened,14))});
-  if(d>=15)out.push({k:'d15',due:15,act:'Send closing message and close',why:'Day 15 reached'});
+  var W=winLen(it);
+  if(d>=W-2&&d<W)out.push({k:'d13',due:W-2,act:'Two days left on this case',why:'Closes on '+fmt(endDate(it))});
+  if(d>=W)out.push({k:'d15',due:W,act:'Send closing message and close',why:'Day '+W+' reached'+(it.extend?', window extended by you':'')});
 
   if(it.sub&&it.sub.indexOf('Waiting for video')===0&&it.vidAsked){
     var since=diffDays(it.vidAsked,today());
@@ -333,12 +348,17 @@ function todosFor(it){
   }
   return out.filter(function(t){return !DB.done[it.id+':'+t.k];});
 }
+function kindOf(k){
+  if(k==='d5')return 'call';
+  if(k.indexOf('task')===0)return 'extra';
+  return 'follow';
+}
 function allTodos(){
   var t=[],bmap={};
   DB.items.forEach(function(it){
     var d=dayNum(it);
     todosFor(it).forEach(function(x){
-      x.it=it;x.over=d-x.due;
+      x.it=it;x.over=d-x.due;x.kind=kindOf(x.k);
       if(x.over>0&&x.k.indexOf('pend')!==0){
         var g=bmap[it.id]||(bmap[it.id]={it:it,list:[]});
         g.list.push(x);
@@ -349,6 +369,7 @@ function allTodos(){
     var g=bmap[k];
     g.list.sort(function(a,c){return c.over-a.over;});
     g.top=g.list[0];g.over=g.top.over;g.extra=g.list.length-1;
+    g.kinds={};g.list.forEach(function(x){g.kinds[x.kind]=(g.kinds[x.kind]||0)+1;});
     return g;
   });
   b.sort(function(a,c){return c.over-a.over;});
@@ -368,14 +389,18 @@ function clearMissed(id){
   });
   save();render();toast('Old steps cleared for '+it.name);
 }
-function behindCard(g){
-  var it=g.it;
+function behindCard(g,kind){
+  var it=g.it,top=g.top;
+  if(kind&&kind!=='all'){
+    var m=g.list.filter(function(x){return x.kind===kind;});
+    if(m.length)top=m[0];
+  }
   return '<div class="todo red">'+
     '<button class="tick" onclick="clearMissed(\''+it.id+'\')" aria-label="Clear missed steps"></button>'+
     '<div class="todo-b" onclick="openItem(\''+it.id+'\')">'+
-      '<div class="todo-act">'+esc(g.top.act)+'</div>'+
-      '<div class="todo-who">'+esc(it.name)+' &middot; '+esc(it.product)+' &middot; day '+dayNum(it)+' of 15</div>'+
-      '<div class="todo-why">'+esc(g.top.why)+'</div>'+
+      '<div class="todo-act">'+esc(top.act)+'</div>'+
+      '<div class="todo-who">'+esc(it.name)+' &middot; '+esc(it.product)+' &middot; day '+dayNum(it)+' of '+winLen(it)+'</div>'+
+      '<div class="todo-why">'+esc(top.why)+'</div>'+
       '<span class="od">'+g.over+' day'+(g.over>1?'s':'')+' late</span>'+
       (g.extra?'<div class="more">'+g.extra+' earlier step'+(g.extra>1?'s':'')+' also missed. Tick the box to clear them all.</div>':'')+
     '</div></div>';
@@ -484,14 +509,31 @@ function render(){
   document.getElementById('p-all').textContent=DB.items.length;
 
   var h='';
-  if(!T.today.length)h='<div class="empty">Nothing due today.<br>Anything you missed shows under behind schedule.</div>';
-  else T.today.forEach(function(x){h+=todoCard(x,false);});
+  var kt=window.__todoKind||'all';
+  var tList=T.today.filter(function(x){return kt==='all'||x.kind===kt;});
+  h=subBar('todo',kt,{
+    all:T.today.length,
+    call:T.today.filter(function(x){return x.kind==='call';}).length,
+    follow:T.today.filter(function(x){return x.kind==='follow';}).length,
+    extra:T.today.filter(function(x){return x.kind==='extra';}).length
+  });
+  if(!T.today.length)h+='<div class="empty">Nothing due today.<br>Anything you missed shows under behind schedule.</div>';
+  else if(!tList.length)h+='<div class="empty">Nothing of that kind due today.</div>';
+  else tList.forEach(function(x){h+=todoCard(x,false);});
   document.getElementById('v-today').innerHTML=h;
 
-  h='';
-  if(!T.behind.length)h='<div class="empty">Nothing behind schedule.</div>';
-  else {h='<div class="more" style="margin-bottom:10px">One card per customer. Ticking clears every missed step for that customer.</div>';
-    T.behind.forEach(function(g){h+=behindCard(g);});}
+  var kb=window.__behindKind||'all';
+  var bList=T.behind.filter(function(g){return kb==='all'||g.kinds[kb];});
+  h=subBar('behind',kb,{
+    all:T.behind.length,
+    call:T.behind.filter(function(g){return g.kinds.call;}).length,
+    follow:T.behind.filter(function(g){return g.kinds.follow;}).length,
+    extra:T.behind.filter(function(g){return g.kinds.extra;}).length
+  });
+  if(!T.behind.length)h+='<div class="empty">Nothing behind schedule.</div>';
+  else if(!bList.length)h+='<div class="empty">Nothing of that kind is behind.</div>';
+  else {h+='<div class="more" style="margin-bottom:10px">One card per customer. Ticking clears every missed step for that customer.</div>';
+    bList.forEach(function(g){h+=behindCard(g,kb);});}
   document.getElementById('v-behind').innerHTML=h;
 
   var qv=(document.getElementById('q')?document.getElementById('q').value:'').toLowerCase().trim();
@@ -513,13 +555,24 @@ function render(){
   document.getElementById('alllist').innerHTML=h;
   renderHome();
 }
+function subBar(which,cur,counts){
+  var defs=[['all','All'],['call','Pending calls'],['follow','Pending follow ups'],['extra','Pending extra tasks']];
+  return '<div class="subs">'+defs.map(function(d){
+    return '<button class="'+(cur===d[0]?'on':'')+'" onclick="setKind(\''+which+'\',\''+d[0]+'\')">'+d[1]+
+           '<span class="c">'+(counts[d[0]]||0)+'</span></button>';
+  }).join('')+'</div>';
+}
+function setKind(which,k){
+  if(which==='todo')window.__todoKind=k;else window.__behindKind=k;
+  render();
+}
 function todoCard(x,over){
   var c=over?'red':(x.custom?'blue':(x.k.indexOf('pend')===0?'blue':(x.k==='d13'||x.k.indexOf('vid')===0?'amber':'')));
   return '<div class="todo '+c+'">'+
     '<button class="tick" onclick="markDone(\''+x.it.id+'\',\''+x.k+'\')" aria-label="Mark done"></button>'+
     '<div class="todo-b" onclick="openItem(\''+x.it.id+'\')">'+
       '<div class="todo-act">'+(x.time?'<span style="color:var(--blue)">'+hhmm(x.time)+'</span>  ':'')+esc(x.act)+'</div>'+
-      '<div class="todo-who">'+esc(x.it.name)+' &middot; '+esc(x.it.product)+' &middot; day '+dayNum(x.it)+' of 15</div>'+
+      '<div class="todo-who">'+esc(x.it.name)+' &middot; '+esc(x.it.product)+' &middot; day '+dayNum(x.it)+' of '+winLen(x.it)+'</div>'+
       '<div class="todo-why">'+esc(x.why)+'</div>'+
       (over?'<span class="od">'+x.over+' day'+(x.over>1?'s':'')+' late</span>':'')+
     '</div></div>';
@@ -528,6 +581,7 @@ function itemCard(it){
   var c=colorOf(it),dl=daysLeft(it),live=isLive(it);
   var t='<span class="tag '+(c||'lgrey')+'">'+esc(it.status)+(it.status==='Resolved'&&it.resolution?', '+esc(it.resolution):'')+'</span>';
   if(it.pausedSince&&live)t+='<span class="tag amber">Paused</span>';
+  if(it.extend&&live)t+='<span class="tag amber">Extended to day '+winLen(it)+'</span>';
   if(it.sub&&live)t+='<span class="tag">'+esc(it.sub)+'</span>';
   if(it.source==='CFO')t+='<span class="tag cfo">CFO transfer</span>';
   if(it.brand)t+='<span class="tag">'+esc(it.brand)+'</span>';
@@ -585,7 +639,8 @@ function openItem(id){
   var h='';
   h+='<div class="card"><div class="dl"><span>Status</span><span>'+esc(it.status)+(it.resolution?', '+esc(it.resolution):'')+'</span></div>';
   if(it.sub&&isLive(it))h+='<div class="dl"><span>Stage</span><span>'+esc(it.sub)+'</span></div>';
-  h+='<div class="dl"><span>Day</span><span>'+d+' of 15'+(isLive(it)?(it.pausedSince?', paused':', '+(dl<0?0:dl)+' left'):'')+'</span></div>';
+  h+='<div class="dl"><span>Day</span><span>'+d+' of '+winLen(it)+(isLive(it)?(it.pausedSince?', paused':', '+(dl<0?0:dl)+' left'):'')+'</span></div>';
+  if(it.extend)h+='<div class="dl"><span>Window</span><span>Extended by '+it.extend+' days, closes '+fmt(endDate(it))+'</span></div>';
   if(it.pausedSince)h+='<div class="dl"><span>Paused since</span><span>'+fmt(it.pausedSince)+'</span></div>';
   else if(it.pausedDays)h+='<div class="dl"><span>Days paused</span><span>'+it.pausedDays+'</span></div>';
   h+='<div class="dl"><span>Opened</span><span>'+fmt(it.opened)+'</span></div>';
@@ -648,7 +703,7 @@ function openItem(id){
 
   if(isLive(it)){
     h+='<h2 class="sec">Ready to send</h2>';
-    h+='<div class="tmpl"><div class="tmpl-t">Ultimatum, deadline '+fmt(addDays(it.opened,14))+'</div><div class="tmpl-x" id="t-ult">'+esc(ultText(it))+'</div><div class="acts"><button class="g sm" onclick="copyTxt(document.getElementById(\'t-ult\').textContent)">Copy</button></div></div>';
+    h+='<div class="tmpl"><div class="tmpl-t">Ultimatum, deadline '+fmt(endDate(it))+'</div><div class="tmpl-x" id="t-ult">'+esc(ultText(it))+'</div><div class="acts"><button class="g sm" onclick="copyTxt(document.getElementById(\'t-ult\').textContent)">Copy</button></div></div>';
     h+='<div class="tmpl"><div class="tmpl-t">Closing message</div><div class="tmpl-x" id="t-cls">'+esc(closeText(it))+'</div><div class="acts"><button class="g sm" onclick="copyTxt(document.getElementById(\'t-cls\').textContent)">Copy</button></div></div>';
   }
 
@@ -660,7 +715,7 @@ function openItem(id){
   pushBlock();
 }
 function ultText(it){
-  return greet()+' '+it.name.split(' ')[0]+'. I have reached out to you a few times about your complaint on the '+it.product+' and I have not heard back from you. I still want to get this sorted for you. If I do not hear from you on or before '+fmt(addDays(it.opened,14))+', I will have to close the case. Please reply whenever you are able to.';
+  return greet()+' '+it.name.split(' ')[0]+'. I have reached out to you a few times about your complaint on the '+it.product+' and I have not heard back from you. I still want to get this sorted for you. If I do not hear from you on or before '+fmt(endDate(it))+', I will have to close the case. Please reply whenever you are able to.';
 }
 function closeText(it){
   return greet()+' '+it.name.split(' ')[0]+'. I reached out to you several times regarding your complaint on the '+it.product+' but I did not get a response. I have closed the case for now. If you still need help with the product, please message me and I will gladly open it back for you. Thank you.';
@@ -746,6 +801,12 @@ function form(it){
       '<option value="__add">Add my own reason</option></select>'+
     '<div id="f-newreason" style="display:none"><label>Type your reason</label><input id="f-reasontext" placeholder="It will be saved to the list"></div>'+
   '</div>';
+  h+='<label>Extend this complaint window</label>'+
+     '<select id="f-extend">'+
+       [0,3,5,7,10,14,21,30].map(function(e){
+         return '<option value="'+e+'"'+((+it.extend||0)===e?' selected':'')+'>'+(e?('15 + '+e+' days, closes on day '+(15+e)):'No extension, closes on day 15')+'</option>';
+       }).join('')+'</select>';
+  h+='<p class="hint">Only the closing date moves. Day 2, day 5 and day 10 stay where they are. The case is tagged as extended so your report shows it was your decision.</p>';
   h+='<label><input type="checkbox" id="f-pause" '+(it.pausedSince?'checked':'')+' style="width:auto;margin-right:8px;vertical-align:-2px">Pause the clock, customer is retrying the product</label>';
   h+='<p class="hint">Use this when you have told the customer to try again over several days. The 15 day countdown stops and all reminders go quiet until you untick it.'+(it.pausedDays?' Already paused for '+it.pausedDays+' day'+(it.pausedDays>1?'s':'')+' in total.':'')+'</p>';
   h+='<label><input type="checkbox" id="f-resp" '+(it.responded?'checked':'')+' style="width:auto;margin-right:8px;vertical-align:-2px">Customer has replied at least once</label>';
@@ -812,6 +873,7 @@ function saveForm(id,isNew,force){
     } else it.reason=rv;
   }
   it.responded=document.getElementById('f-resp').checked;
+  it.extend=+val('f-extend')||0;
   var wantPause=document.getElementById('f-pause').checked;
   if(wantPause&&!it.pausedSince)it.pausedSince=today();
   if(!wantPause&&it.pausedSince){it.pausedDays=(it.pausedDays||0)+diffDays(it.pausedSince,today());it.pausedSince='';}
@@ -848,10 +910,38 @@ function parseRaw(){
 function closeSheet(){document.getElementById('sheet').classList.remove('on');}
 
 /* ---------- report ---------- */
+function rangeChg(){
+  var v=document.getElementById('repdays').value,ex=v==='custom';
+  document.getElementById('repexact').style.display=ex?'block':'none';
+  document.getElementById('repnum').style.display=ex?'none':'block';
+  if(ex){
+    var fd=document.getElementById('rf-date'),td=document.getElementById('rt-date'),tt=document.getElementById('rt-time');
+    if(!fd.value)fd.value=addDays(today(),-6);
+    if(!td.value)td.value=today();
+    if(!tt.value){var n=new Date();tt.value=p2(n.getHours())+':'+p2(n.getMinutes());}
+  }
+  buildReport();
+}
 function buildReport(){
-  var custom=document.getElementById('repcustom').value;
-  var n=custom?Math.max(1,Math.min(365,+custom)):+document.getElementById('repdays').value;
-  var to=today(),from=addDays(to,-(n-1));
+  var sel=document.getElementById('repdays').value;
+  var exact=sel==='custom';
+  var from,to,n,head,rangeLine='';
+  if(exact){
+    from=document.getElementById('rf-date').value||addDays(today(),-6);
+    to=document.getElementById('rt-date').value||today();
+    var ft=document.getElementById('rf-time').value||'00:00';
+    var tt2=document.getElementById('rt-time').value||'23:59';
+    if(from>to){var sw=from;from=to;to=sw;}
+    n=diffDays(from,to)+1;
+    head='THIS PERIOD';
+    rangeLine='Covering: '+fmt(from)+' '+hhmm(ft)+' to '+fmt(to)+' '+hhmm(tt2);
+  } else {
+    var custom=document.getElementById('repcustom').value;
+    n=custom?Math.max(1,Math.min(365,+custom)):+sel;
+    to=today();from=addDays(to,-(n-1));
+    head=n===1?'TODAY':('LAST '+n+' DAYS');
+    if(n>1)rangeLine='Covering: '+fmt(from)+' to '+fmt(to);
+  }
   var inR=function(d){return d&&d>=from&&d<=to;};
   var neu=DB.items.filter(function(i){return inR(i.opened);});
   var res=DB.items.filter(function(i){return !isLive(i)&&inR(i.closedOn);});
@@ -861,7 +951,30 @@ function buildReport(){
   res.forEach(function(i){if(i.resolution==='Refunded'&&i.amount){var m=(i.amount.match(/[\d,]+/)||[''])[0].replace(/,/g,'');if(m)refund+=+m;}});
   var d=new Date(),hh=d.getHours(),mm=p2(d.getMinutes());
   var ampm=hh<12?'AM':'PM',h12=hh%12||12;
-  var head=n===1?'TODAY':('LAST '+n+' DAYS');
+  function fullStory(i){
+    var b=[];
+    b.push('Status: '+i.status+(i.sub?', '+i.sub:'')+(i.resolution?', '+i.resolution:''));
+    b.push('Brand: '+(i.brand||'not set')+' | Product: '+i.product+' | Source: '+(i.source==='CFO'?'CFO transfer':'Direct customer'));
+    b.push('Opened '+fmt(i.opened)+', now day '+dayNum(i)+' of '+winLen(i)+
+      (i.extend?' (window extended by me by '+i.extend+' days)':'')+
+      (i.pausedSince?' (clock paused since '+fmt(i.pausedSince)+')':'')+
+      (isLive(i)?', '+(daysLeft(i)<0?(-daysLeft(i))+' days over':daysLeft(i)+' days left'):''));
+    if(i.state)b.push('State: '+i.state);
+    if(i.sinkflusher){
+      b.push('Diagnosis: drain '+(i.drain||'not stated')+', water '+(i.water||'not stated')+', usage '+(i.usage||'not established'));
+      b.push('Video: '+(i.vidGot?'received':(i.vidAsked?'requested '+fmt(i.vidAsked)+', still waiting':'not requested yet')));
+    }
+    if(i.issue)b.push('What the customer complained about: '+i.issue.replace(/\s+/g,' ').trim());
+    if(i.notes&&i.notes.length){
+      b.push('Progress notes:');
+      i.notes.forEach(function(nt){
+        b.push('   '+fmt(nt.d)+' (day '+(diffDays(i.opened,nt.d)+1)+'): '+nt.t.replace(/\s+/g,' ').trim());
+      });
+    } else b.push('Progress notes: none written');
+    var open=(i.tasks||[]).filter(function(tk){return !tk.done;});
+    if(open.length)b.push('My own tasks outstanding: '+open.map(function(tk){return tk.text+' on '+fmt(tk.date)+(tk.time?' at '+hhmm(tk.time):'');}).join('; '));
+    return b;
+  }
   function lastNote(i){
     if(i.notes&&i.notes.length)return i.notes[i.notes.length-1].t.replace(/\s+/g,' ').trim();
     return i.sub||i.status;
@@ -869,7 +982,7 @@ function buildReport(){
   var L=[];
   L.push('\u{1F4CB} CUSTOMER COMPLAINT REPORT');
   L.push('Date: '+to.split('-').reverse().join('/'));
-  if(n>1)L.push('Covering: '+fmt(from)+' to '+fmt(to));
+  if(rangeLine)L.push(rangeLine);
   L.push('Time: '+p2(h12)+':'+mm+' '+ampm);
   L.push('');
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
@@ -908,6 +1021,8 @@ function buildReport(){
   L.push('');
   if(pend.length)pend.forEach(function(i,k){
     L.push((k+1)+'. '+i.name+' - '+i.product+' - [Days: '+dayNum(i)+'] - '+lastNote(i));
+    fullStory(i).forEach(function(ln){L.push('   '+ln);});
+    L.push('');
   });else L.push('None');
   L.push('');
   L.push('Total Pending: '+pend.length);
@@ -915,13 +1030,30 @@ function buildReport(){
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
   L.push('');
   L.push('\u26A0\uFE0F NEEDS ATTENTION');
-  if(esc_.length)esc_.forEach(function(i,k){L.push((k+1)+'. '+i.name+' - '+i.product+' - [Days: '+dayNum(i)+'] - '+lastNote(i));});
-  else L.push('None');
+  if(esc_.length)esc_.forEach(function(i,k){
+    L.push((k+1)+'. '+i.name+' - '+i.product+' - [Days: '+dayNum(i)+'] - '+lastNote(i));
+    fullStory(i).forEach(function(ln){L.push('   '+ln);});
+    L.push('');
+  });else L.push('None');
   L.push('');
   L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
   L.push('');
   L.push('SUMMARY');
   L.push('New: '+neu.length+' | Closed off: '+res.length+' | Pending: '+pend.length);
+  L.push('');
+  L.push('\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501');
+  L.push('');
+  L.push('INSTRUCTION FOR CLAUDE, everything above this line is my raw case data');
+  L.push('');
+  L.push('Turn the raw data above into my finished complaint report for Mr Toheeb, my manager.');
+  L.push('');
+  L.push('Use my exact report format, the one saved in my working context. Do not rearrange, rename or add sections.');
+  L.push('');
+  L.push('For every pending case, read the whole progress note history and write one short line that says where the case stands AND how it got there, so nobody needs to ask me a follow up question. Say what I did, what the customer did or failed to do, and what I am waiting on. Keep it to one or two sentences per customer.');
+  L.push('');
+  L.push('Write in first person as me. No numbered lists inside the write ups, no hyphens or dashes as punctuation, use commas instead. Warm but concise, never AI sounding.');
+  L.push('');
+  L.push('Flag anything in this data that breaks my own SOP, for example a case past its window, a case with no video requested after many days, or a case I have not touched in over a week. Put those in a short note to me at the very end, separate from the report itself, not inside the report body.');
   document.getElementById('repout').textContent=L.join('\n');
 }
 
